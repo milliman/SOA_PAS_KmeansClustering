@@ -1,0 +1,139 @@
+---
+title: "K-means Steps with Iris Data"
+author: "Matthias Kullowatz"
+output: 
+  html_document:
+    toc: true
+    fig_width: 5
+    fig_height: 5
+---
+
+
+## Intro
+Here we write some code to break down the results of K-means clustering step-by-step. We will use Fisher's famous iris dataset as an example, and we will cluster the flowers based on petal length and sepal length so that we can show intuitive, two-dimensional plots of the process.
+
+## Standardization
+To ensure that all dimensions are weighted equally, we standardize their values.
+```{r Standardize, message = F, warning = F}
+library(dplyr)
+iris.z <- iris %>%
+  mutate_at(.cols = names(iris)[1:4],
+            .funs = scale)
+```
+
+
+## Centroid initialization
+Cluster "centroids" are defined as the mean vector of each cluster group across the clustering dimensions. However, before the process begins, no points have been assigned to clusters, so centroids must be initialized. There is no single agreed-upon method for intializing the point values of each centroid. As an example of one method, David Arthur and Sergei Vassilvitskii offer an algorithmic approach to this step in their paper, (The Advantages of Careful Seeding)[http://ilpubs.stanford.edu:8090/778/1/2006-13.pdf]. Their approach aims to help spread the initial centroids out. Here, we will simply select three reasonably spaced centroids.
+
+```{r InitCentroids}
+centroids <- data.frame(Sepal.Length = c(0, 0, 0), Petal.Length = c(-1, 0, 1))
+plot(centroids$Petal.Length, centroids$Sepal.Length, 
+     pch = 20, col = 'black', cex = 2,
+     main = 'Initial centroids: step 0',
+     xlab = 'Petal length (Z-score)', ylab = 'Sepal Length (Z-score)',
+     xlim = c(-2.5, 2.5), ylim = c(-2.5, 2.5))
+points(iris.z$Petal.Length, iris.z$Petal.Width,
+       pch = '*:', cex = 1.5, col = 'grey')
+```
+
+## Observation assignment
+Now that we have our initial cluster centroids, we can begin assigning the observations (iris flowers) to each cluster. In order to help minimize the sum of squared deviations between the points and the centroid, we assign each observed point to its nearest centroid using the conventional Euclidean distance.
+```{r Assignment1}
+distances <- data.frame(c1 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[1,])^2))),
+                        c2 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[2,])^2))),           
+                        c3 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[3,])^2)))) %>%
+  rowwise() %>%
+  mutate(Cluster = which.min(c(c1, c2, c3)))
+
+plot(iris.z$Petal.Length, iris.z$Sepal.Length,
+     pch = '*:', cex = 1.5,
+     col = ifelse(distances$Cluster == 1, 'red',
+                  ifelse(distances$Cluster == 2, 'green', 'blue')),
+     main = 'Cluster assignment: step 1',
+     xlab = 'Petal length (Z-score)', ylab = 'Sepal Length (Z-score)',
+     xlim = c(-2.5, 2.5), ylim = c(-2.5, 2.5))
+points(centroids$Petal.Length, centroids$Sepal.Length, 
+       pch = 20, col = 'black', cex = 2)
+
+centroids <- data.frame(Sepal.Length = tapply(iris.z$Sepal.Length, distances$Cluster, mean), 
+                        Petal.Length = tapply(iris.z$Petal.Length, distances$Cluster, mean))
+plot(iris.z$Petal.Length, iris.z$Sepal.Length,
+     pch = '*:', cex = 1.5,
+     col = ifelse(distances$Cluster == 1, 'red',
+                  ifelse(distances$Cluster == 2, 'green', 'blue')),
+     main = 'Centroid recalculation: step 1',
+     xlab = 'Petal length (Z-score)', ylab = 'Sepal Length (Z-score)',
+     xlim = c(-2.5, 2.5), ylim = c(-2.5, 2.5))
+points(centroids$Petal.Length, centroids$Sepal.Length, 
+       pch = 20, col = 'black', cex = 2)
+```
+
+## Iteration
+The process of assigning observations and recalculating centroids repeats until the centroids converge (i.e. they stop moving). Below I have included some code that could be run to perform this iteration, stopping when the new cluster centroids are all less than 0.0001 units away from the previous iteration's cluster centroids. This particular algorithm converged by its ninth iteration.
+```{r Iteration}
+tolerance <- 0.0001
+centroids <- data.frame(Sepal.Length = c(0, 0, 0), Petal.Length = c(-1, 0, 1))
+converge <- 1
+counter <- 1
+while(converge > tolerance){
+  distances <- data.frame(c1 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[1,])^2))),
+                          c2 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[2,])^2))),           
+                          c3 = apply(iris.z[,c(1,3)], 1, function(x) sqrt(sum((x - centroids[3,])^2)))) %>%
+    rowwise() %>%
+    mutate(Cluster = which.min(c(c1, c2, c3)))
+  
+  
+  new.centroids <- data.frame(Sepal.Length = tapply(iris.z$Sepal.Length, distances$Cluster, mean), 
+                              Petal.Length = tapply(iris.z$Petal.Length, distances$Cluster, mean))
+  
+  converge <- max(apply(new.centroids - centroids, 1, function(x) sqrt(sum(x^2))))
+  centroids <- new.centroids
+  
+  counter <- counter + 1
+}
+```
+
+## Final cluster assignments
+The following two plots show that a number of irises were misclassified. Using only two dimensions for classificiation, petal length and sepal length, the k-means algorithm found it especially difficult to identify the dividing line between the versicolor and virginica species. With more dimensions available across which to calculate distances, some of these misclassifications can be corrected. 
+```{r Finalclusters}
+plot(iris.z$Petal.Length, iris.z$Sepal.Length,
+     pch = '*:', cex = 1.5,
+     col = ifelse(distances$Cluster == 1, 'red',
+                  ifelse(distances$Cluster == 2, 'green', 'blue')),
+     main = 'Final cluster plot',
+     xlab = 'Petal length (Z-score)', ylab = 'Sepal Length (Z-score)',
+     xlim = c(-2.5, 2.5), ylim = c(-2.5, 2.5))
+points(centroids$Petal.Length, centroids$Sepal.Length, 
+       pch = 20, col = 'black', cex = 2)
+
+plot(iris.z$Petal.Length, iris.z$Sepal.Length,
+     pch = '*:', cex = 1.5,
+     col = ifelse(iris.z$Species == 'setosa', 'red',
+                  ifelse(iris.z$Species == 'versicolor', 'green', 'blue')),
+     main = 'Actual iris species',
+     xlab = 'Petal length (Z-score)', ylab = 'Sepal Length (Z-score)',
+     xlim = c(-2.5, 2.5), ylim = c(-2.5, 2.5))
+points(centroids$Petal.Length, centroids$Sepal.Length, 
+       pch = 20, col = 'black', cex = 2)
+legend(x = 'bottomright',
+       legend = c('Setosa', 'Versicolor', 'Virginica'),
+       fill = c('red', 'green', 'blue'))
+```
+
+## K-means algorithm (stats package)
+```{r kmeansstats}
+set.seed(1)
+output <- kmeans(x = iris.z[,1:4],
+                 centers = 3)
+```
+
+### Comparing accuracy
+One notes some improvement when we consider the other two dimensions in the cluster process, petal width and sepal width. Both algorithms correctly classified all the setosa irises, but the two-dimensional method missed on 13 versicolors and 16 virginicas. The four-dimensional method missed on 11 versicolors and 14 virginicas.
+```{r accuracy}
+## 2-D example
+(tab2 <- table(as.factor(distances$Cluster), iris$Species))
+
+## 4-D example
+(tab4 <- table(as.factor(output$cluster), iris$Species))
+```
+
